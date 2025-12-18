@@ -11,14 +11,25 @@ import json
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="TerraLens Pro", page_icon="🌱", layout="centered")
 
-# --- FIREBASE SETUP (Updated) ---
-# Hum seedha secrets mangenge. Agar key nahi mili, toh Streamlit khud error dikhayega.
-key_dict = json.loads(st.secrets["textkey"])
-cred = credentials.Certificate(key_dict)
+# --- FIREBASE SETUP (Fix for Private Key Error) ---
+try:
+    # Secrets se JSON string uthayein
+    key_dict = json.loads(st.secrets["textkey"])
+    
+    # --- BUG FIX: New Lines ko repair karein ---
+    # Copy-paste mein aksar '\n' kharab ho jata hai, ye line usse theek kar degi
+    if "private_key" in key_dict:
+        key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
 
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
+    cred = credentials.Certificate(key_dict)
+    
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
 
+    db = firestore.client()
+except Exception as e:
+    st.error(f"❌ Firebase Error: {e}")
+    st.stop()
 db = firestore.client()
 # --- MODEL LOADING ---
 @st.cache_resource
