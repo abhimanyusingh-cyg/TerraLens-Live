@@ -11,21 +11,15 @@ import json
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="TerraLens Pro", page_icon="🌱", layout="centered")
 
-# --- FIREBASE SETUP (CLOUD VERSION) ---
-# Ye code ab Streamlit Secrets (Cloud) se key uthayega
+# --- FIREBASE SETUP (Updated) ---
+# Hum seedha secrets mangenge. Agar key nahi mili, toh Streamlit khud error dikhayega.
+key_dict = json.loads(st.secrets["textkey"])
+cred = credentials.Certificate(key_dict)
+
 if not firebase_admin._apps:
-    try:
-        # Koshish karein Secrets se key lene ki (Jab Live hoga)
-        key_dict = json.loads(st.secrets["textkey"])
-        cred = credentials.Certificate(key_dict)
-        firebase_admin.initialize_app(cred)
-    except:
-        # Agar Secrets nahi mile (Local testing), toh purana tareeka
-        # (Lekin deploy karte waqt Secrets zaroori hain)
-        pass
+    firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-
 # --- MODEL LOADING ---
 @st.cache_resource
 def load_model():
