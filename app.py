@@ -11,37 +11,49 @@ import pandas as pd
 from datetime import datetime
 from streamlit_js_eval import get_geolocation
 
-# --- PAGE CONFIGURATION ---
+# --- PAGE CONFIG ---
 st.set_page_config(page_title="TerraLens Pro", page_icon="🌱", layout="wide")
 
-# --- CUSTOM CSS (Advanced Design) ---
+# --- DESIGN UPGRADE (CSS) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #f8fafc; color: #1e293b; }
-    div.stButton > button {
-        background: linear-gradient(90deg, #059669 0%, #10b981 100%);
-        color: white; border-radius: 25px; border: none; padding: 10px 25px;
-        font-weight: 600; width: 100%; transition: 0.3s;
-    }
-    .badge-card {
-        padding: 15px; border-radius: 15px; text-align: center;
-        border: 2px solid #e2e8f0; margin-bottom: 15px;
-    }
-    .history-card {
-        background: white; padding: 10px; border-radius: 10px;
-        margin-bottom: 8px; border-left: 5px solid #10b981;
-    }
+    .stApp { background-color: #f8fafc; }
+    [data-testid="stMetric"] { background: white; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; }
+    .badge-card { padding: 15px; border-radius: 12px; text-align: center; border: 2px solid #e2e8f0; margin-bottom: 10px; font-weight: bold; }
+    .history-card { background: white; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 6px solid #10b981; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    div.stButton > button { border-radius: 20px; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- UTILS & LOGIC ---
+# --- LOGIC FUNCTIONS (ALL PREVIOUS ALIGNED) ---
 def get_rank(points):
-    if points < 50: return "Green Rookie 🌱", "#94a3b8"
-    if points < 200: return "Waste Warrior ⚔️", "#10b981"
-    return "Eco Legend 👑", "#f59e0b"
+    if points < 50: return "Green Rookie 🌱", "#94a3b8" # Grey
+    if points < 200: return "Waste Warrior ⚔️", "#10b981" # Green
+    return "Eco Legend 👑", "#f59e0b" # Gold
 
 def make_hashes(password): return hashlib.sha256(str.encode(password)).hexdigest()
 def check_hashes(password, hashed_text): return make_hashes(password) == hashed_text
+
+def check_if_recyclable(label):
+    label = label.lower()
+    mapping = {
+        'plastic': ['bottle', 'plastic', 'lotion', 'sunscreen', 'cup', 'whistle', 'candle'],
+        'paper': ['carton', 'paper', 'envelope', 'tissue', 'towel', 'diaper', 'packet'],
+        'metal': ['can', 'beer_glass', 'corkscrew'],
+        'glass': ['goblet', 'wine_bottle', 'beaker']
+    }
+    for category, keywords in mapping.items():
+        if any(key in label for key in keywords): return True, category.upper()
+    return False, label
+
+def check_cooldown(username):
+    doc = db.collection('users').document(username).get()
+    if doc.exists:
+        last_scan = doc.to_dict().get('last_scan_timestamp')
+        if last_scan:
+            diff = datetime.now().timestamp() - last_scan
+            if diff < 60: return False, int(60 - diff)
+    return True, 0
 
 # --- FIREBASE SETUP ---
 if not firebase_admin._apps:
@@ -57,14 +69,7 @@ if not firebase_admin._apps:
 db = firestore.client()
 model = tf.keras.applications.MobileNetV2(weights='imagenet')
 
-# --- DATA FUNCTIONS ---
-def get_user_data(username):
-    return db.collection('users').document(username).get().to_dict()
-
-def get_user_history(username):
-    docs = db.collection('scans').where('user', '==', username).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).stream()
-    return [doc.to_dict() for doc in docs]
-
+# --- DATA ACTIONS ---
 def save_scan_data(username, item_type, lat, lon):
     db.collection('users').document(username).update({
         "points": firestore.Increment(10),
@@ -72,91 +77,103 @@ def save_scan_data(username, item_type, lat, lon):
     })
     db.collection('scans').add({
         "user": username, "item": item_type, "lat": lat, "lon": lon,
-        "timestamp": firestore.SERVER_TIMESTAMP, "date_str": datetime.now().strftime("%d %b, %Y")
+        "timestamp": firestore.SERVER_TIMESTAMP, 
+        "time_str": datetime.now().strftime("%H:%M"),
+        "date_str": datetime.now().strftime("%d %b")
     })
 
-# --- UI COMPONENTS ---
+# --- UI LOGIC ---
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 
 if not st.session_state['logged_in']:
     st.title("🌱 TerraLens Pro")
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([1,1.5])
     with c1:
-        user = st.text_input("Username")
-        pwd = st.text_input("Password", type="password")
-        if st.button("Login"):
-            doc = db.collection('users').document(user).get()
-            if doc.exists and check_hashes(pwd, doc.to_dict()['password']):
-                st.session_state['logged_in'] = True
-                st.session_state['username'] = user
-                st.rerun()
-    with c2: st.image("https://images.unsplash.com/photo-1532996122724-e3c354a0b15b", width=400)
+        st.subheader("Join the Movement")
+        choice = st.radio("Access", ["Login", "Sign Up"], horizontal=True)
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        if st.button("Go"):
+            if choice == "Login":
+                doc = db.collection('users').document(u).get()
+                if doc.exists and check_hashes(p, doc.to_dict()['password']):
+                    st.session_state['logged_in'], st.session_state['username'] = True, u
+                    st.rerun()
+                else: st.error("Wrong details")
+            else:
+                if db.collection('users').document(u).get().exists: st.error("Exists")
+                else: 
+                    db.collection('users').document(u).set({"name": u, "password": make_hashes(p), "points": 0})
+                    st.success("Account Created!")
+    with c2: st.image("https://images.unsplash.com/photo-1542601906990-b4d3fb778b09", caption="AI Powered Earth Care")
 
 else:
-    user_info = get_user_data(st.session_state['username'])
-    points = user_info.get('points', 0)
-    rank, r_color = get_rank(points)
+    # --- LOGGED IN ---
+    u_info = db.collection('users').document(st.session_state['username']).get().to_dict()
+    pts = u_info.get('points', 0)
+    rank, r_col = get_rank(pts)
 
     with st.sidebar:
-        st.markdown(f"### Welcome, {st.session_state['username']}!")
-        st.markdown(f"<div class='badge-card' style='background:{r_color}22;'><h3>{rank}</h3><p>{points} Points</p></div>", unsafe_allow_html=True)
+        st.markdown(f"## 👤 {st.session_state['username']}")
+        st.markdown(f"<div class='badge-card' style='background:{r_col}22; border-color:{r_col}; color:{r_col};'> {rank} </div>", unsafe_allow_html=True)
+        st.metric("Total Balance", f"{pts} 🪙")
         
-        # --- CERTIFICATE LOGIC ---
-        if points >= 100:
-            st.success("🏆 Certificate Unlocked!")
-            if st.button("🎓 Download Certificate"):
+        # CERTIFICATE
+        if pts >= 100:
+            if st.button("🎓 View Certificate"):
                 st.balloons()
-                # Simple HTML Certificate
-                cert_html = f"""
-                <div style="border:10px solid {r_color}; padding:50px; text-align:center; font-family:serif; background:white;">
-                    <h1 style="font-size:50px;">Certificate of Appreciation</h1>
-                    <p style="font-size:20px;">This is to certify that</p>
-                    <h2 style="font-size:40px; color:#059669;">{st.session_state['username'].upper()}</h2>
-                    <p style="font-size:20px;">has achieved the rank of <b>{rank}</b></p>
-                    <p>for outstanding contribution to Planet Earth via TerraLens.</p>
-                    <hr width="50%">
-                    <p>Verified AI Record | {datetime.now().strftime('%Y')}</p>
-                </div>
-                """
-                st.markdown(cert_html, unsafe_allow_html=True)
-                st.caption("Right click and 'Print' to save as PDF")
-        else:
-            st.info(f"Goal: Reach 100 pts for Certificate (Need {100-points} more)")
-            
+                st.markdown(f"""
+                <div style="border:5px solid {r_col}; padding:20px; text-align:center; background:white; color:black;">
+                    <h3>Earth Guardian Award</h3>
+                    <p>Presented to</p>
+                    <h2 style="color:#059669;">{st.session_state['username'].upper()}</h2>
+                    <p>For achieving the rank of <b>{rank}</b></p>
+                </div>""", unsafe_allow_html=True)
+        
         if st.button("Logout"):
             st.session_state['logged_in'] = False
             st.rerun()
 
-    tab1, tab2, tab3 = st.tabs(["📸 Scanner", "📊 Impact Map", "📜 History"])
+    t1, t2, t3, t4 = st.tabs(["📸 Scanner", "📊 Impact Dashboard", "📜 History", "🏆 Global Leaderboard"])
 
-    with tab1:
-        # Scanner logic (Same as before)
-        location = get_geolocation()
-        if location and 'coords' in location:
-            lat, lon = location['coords']['latitude'], location['coords']['longitude']
-            st.success("📍 GPS Ready")
-            img = st.camera_input("Scan Waste")
-            if img and st.button("Verify"):
-                # (AI Analysis & Save Data code here - use previous logic)
-                st.success("Added to history!")
-        else: st.warning("Waiting for GPS...")
+    with t1:
+        st.subheader("♻️ New Scan")
+        loc = get_geolocation()
+        if loc and 'coords' in loc:
+            lat, lon = loc['coords']['latitude'], loc['coords']['longitude']
+            st.success("📍 GPS Locked")
+            img = st.camera_input("Snapshot")
+            if img:
+                if st.button("Verify & Claim Points"):
+                    can, sec = check_cooldown(st.session_state['username'])
+                    if not can: st.error(f"Wait {sec}s (Anti-Cheat Active)")
+                    else:
+                        with st.spinner("Analyzing..."):
+                            label = tf.keras.applications.mobilenet_v2.decode_predictions(model.predict(np.expand_dims(tf.keras.applications.mobilenet_v2.preprocess_input(np.array(ImageOps.fit(Image.open(img), (224,224)))),0)), top=1)[0][0][1]
+                            ok, cat = check_if_recyclable(label)
+                            if ok:
+                                save_scan_data(st.session_state['username'], cat, lat, lon)
+                                st.success(f"Verified {cat}! +10 Points")
+                            else: st.error(f"Not Recyclable: {label}")
+        else: st.warning("Please enable GPS to scan.")
 
-    with tab2:
-        # Map logic (Same as before)
-        docs = db.collection('scans').stream()
-        df = pd.DataFrame([d.to_dict() for d in docs])
-        if not df.empty: st.map(df[['lat', 'lon']])
+    with t2:
+        st.subheader("🌏 Real-time Impact Analytics")
+        df = pd.DataFrame([d.to_dict() for d in db.collection('scans').stream()])
+        if not df.empty:
+            m1, m2 = st.columns(2)
+            m1.metric("Total Items", len(df))
+            m2.metric("Community Points", len(df)*10)
+            st.map(df[['lat', 'lon']])
+            st.bar_chart(df['item'].value_counts())
 
-    with tab3:
-        st.subheader("📜 Your Recent Scans")
-        history = get_user_history(st.session_state['username'])
-        if history:
-            for item in history:
-                st.markdown(f"""
-                <div class="history-card">
-                    <b>{item['item']}</b> - {item.get('date_str', 'Today')} <br>
-                    <small>📍 {item['lat']:.2f}, {item['lon']:.2f}</small>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.write("No scans yet. Go to the Scanner tab!")
+    with t3:
+        st.subheader("Your Scan Timeline")
+        hist = [d.to_dict() for d in db.collection('scans').where('user','==',st.session_state['username']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).stream()]
+        for h in hist:
+            st.markdown(f"<div class='history-card'><b>{h['item']}</b> Waste <br><small>📅 {h.get('date_str','Today')} at {h.get('time_str','--')}</small></div>", unsafe_allow_html=True)
+
+    with t4:
+        st.subheader("Global Ranks")
+        leaders = pd.DataFrame([{"Name": d.to_dict()['name'], "Points": d.to_dict()['points']} for d in db.collection('users').order_by('points', direction=firestore.Query.DESCENDING).limit(10).stream()])
+        st.table(leaders)
