@@ -2,62 +2,156 @@ import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
+import firebase_admin
+from firebase_admin import credentials, firestore
+import hashlib
+import time
 
-# --- AI MODEL LOAD (V2) ---
-# Dhyan rahe 'best.pt' file aapke main folder mein honi chahiye
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="TerraLens Pro V2", layout="wide")
+
+# --- FIREBASE SETUP ---
+if not firebase_admin._apps:
+    try:
+        # Apni JSON key file ka sahi naam yahan likhein
+        cred = credentials.Certificate("serviceAccountKey.json")
+        firebase_admin.initialize_app(cred)
+    except:
+        st.error("Firebase key file nahi mili!")
+db = firestore.client()
+
+# --- AI MODEL LOAD (YOLOv8) ---
+@st.cache_resource
+def load_yolo_model():
+    return YOLO('best.pt')
+
 try:
-    model = YOLO('best.pt') 
+    model = load_yolo_model()
 except Exception as e:
-    st.error("Model file 'best.pt' nahi mili. Please upload it to your repo.")
+    st.error(f"Model Load Error: {e}")
 
-# --- WASTE MAPPING LOGIC ---
-# Roboflow ke dataset mein jo classes thi, unhe yahan map karein
-# Agar aapke dataset mein alag categories hain, toh unhe update karein
-WASTE_CATEGORIES = {
-    'plastic': {'points': 10, 'recyclable': True},
-    'metal': {'points': 15, 'recyclable': True},
-    'paper': {'points': 5, 'recyclable': True},
-    'glass': {'points': 12, 'recyclable': True},
-    'trash': {'points': 0, 'recyclable': False}
+# --- WASTE MAPPING ---
+# Roboflow ke classes ke hisaab se ise adjust karein
+WASTE_MAP = {
+    'plastic': {'points': 10, 'msg': "Great! Plastic recycled. ♻️"},
+    'paper': {'points': 5, 'msg': "Paper added! Keep it up. 📄"},
+    'metal': {'points': 15, 'msg': "Metal is valuable! Nice work. 🥫"},
+    'glass': {'points': 12, 'msg': "Glass handled safely. 🍾"},
+    'trash': {'points': 0, 'msg': "Non-recyclable item detected. 🚮"}
 }
 
-def process_detection(image):
-    # Model se prediction lena
+# --- FUNCTIONS ---
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def process_yolo(image):
     results = model(image)
+    detected_items = []
     
-    detections = []
-    # Results ko process karna
     for r in results:
-        # Detected image (boxes ke saath)
-        im_array = r.plot()  # Bounding boxes draw karta hai
-        res_image = Image.fromarray(im_array[..., ::-1]) # RGB conversion
+        # Bounding box wali image generate karna
+        im_array = r.plot()  # Plotting boxes
+        res_image = Image.fromarray(im_array[..., ::-1])
         
         for box in r.boxes:
             class_id = int(box.cls[0])
             label = model.names[class_id].lower()
             conf = float(box.conf[0])
-            if conf > 0.4: # 40% confidence threshold
-                detections.append(label)
+            if conf > 0.4: # 40% Confidence
+                detected_items.append(label)
                 
-    return res_image, detections
+    return res_image, detected_items
 
-# --- STREAMLIT UI UPDATE ---
-st.title("🌱 TerraLens Pro V2: Live AI Scanner")
+# --- SESSION STATE ---
+if 'user_id' not in st.session_state:
+    st.session_state['user_id'] = None
 
-uploaded_file = st.camera_input("Scan Waste")
-
-if uploaded_file:
-    img = Image.open(uploaded_file)
-    
-    # Process Detection
-    with st.spinner('AI analyzing frames...'):
-        processed_img, detected_items = process_detection(img)
-    
-    # Show Output Image with Boxes
-    st.image(processed_img, caption="AI Real-time Detection")
-    
-    if detected_items:
-        st.success(f"Detected: {', '.join(set(detected_items))}")
-        # Baaki points aur database logic yahan aayega...
+# --- SIDEBAR: LOGIN/SIGNUP ---
+with st.sidebar:
+    st.title("🔐 User Portal")
+    if not st.session_state['user_id']:
+        choice = st.radio("Access", ["Login", "Sign Up"])
+        u_email = st.text_input("Email")
+        u_pass = st.text_input("Password", type='password')
+        
+        if st.button("Proceed"):
+            h_pass = make_hashes(u_pass)
+            if choice == "Sign Up":
+                db.collection('users').document(u_email).set({
+                    'email': u_email, 'pass': h_pass, 'points': 0, 'level': 'Rookie'
+                })
+                st.success("Account Created!")
+            else:
+                user_doc = db.collection('users').document(u_email).get()
+                if user_doc.exists and user_doc.to_dict()['pass'] == h_pass:
+                    st.session_state['user_id'] = u_email
+                    st.rerun()
+                else:
+                    st.error("Invalid Credentials")
     else:
-        st.warning("Kuch pehchaan mein nahi aaya. Please try another angle.")
+        st.write(f"Logged in as: **{st.session_state['user_id']}**")
+        if st.button("Logout"):
+            st.session_state['user_id'] = None
+            st.rerun()
+
+# --- MAIN APP INTERFACE ---
+if st.session_state['user_id']:
+    st.header("🌱 TerraLens AI Scanner (YOLOv8)")
+    
+    # User Stats
+    u_data = db.collection('users').document(st.session_state['user_id']).get().to_dict()
+    col1, col2 = st.columns(2)
+    col1.metric("Your Eco-Points", u_data['points'])
+    col2.metric("Current Rank", u_data['level'])
+
+    # Camera Input
+    img_file = st.camera_input("Scan Waste Item")
+
+    if img_file:
+        img = Image.open(img_file)
+        with st.spinner('AI analyzing...'):
+            processed_img, detected_labels = process_yolo(img)
+        
+        st.image(processed_img, caption="AI Result (Detection Boxes)")
+        
+        if detected_labels:
+            # Sirf unique items pakadna
+            unique_items = list(set(detected_labels))
+            st.write(f"✅ Found: {', '.join(unique_items)}")
+            
+            total_points_earned = 0
+            for item in unique_items:
+                if item in WASTE_MAP:
+                    points = WASTE_MAP[item]['points']
+                    total_points_earned += points
+                    st.info(f"{item.capitalize()}: {WASTE_MAP[item]['msg']}")
+            
+            if total_points_earned > 0:
+                if st.button("Claim Points"):
+                    new_pts = u_data['points'] + total_points_earned
+                    # Level Logic
+                    new_lvl = "Rookie"
+                    if new_pts > 100: new_lvl = "Eco-Warrior"
+                    if new_pts > 500: new_lvl = "Sustainability Legend"
+                    
+                    db.collection('users').document(st.session_state['user_id']).update({
+                        'points': new_pts,
+                        'level': new_lvl
+                    })
+                    st.balloons()
+                    st.success(f"Added {total_points_earned} points to your account!")
+                    time.sleep(2)
+                    st.rerun()
+        else:
+            st.warning("AI couldn't verify the item. Try a better angle.")
+
+else:
+    st.info("Please Login from the sidebar to start scanning!")
+
+# --- FOOTER: LEADERBOARD ---
+st.divider()
+st.subheader("🏆 Global Eco-Leaders")
+top_users = db.collection('users').order_by('points', direction=firestore.Query.DESCENDING).limit(5).get()
+for i, user in enumerate(top_users):
+    d = user.to_dict()
+    st.text(f"{i+1}. {d['email']} - {d['points']} pts ({d['level']})")
