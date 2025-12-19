@@ -6,11 +6,10 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import hashlib
 import time
+import json
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="TerraLens Pro V2", layout="wide")
-
-import json
 
 # --- FIREBASE SETUP (Updated for Secrets) ---
 if not firebase_admin._apps:
