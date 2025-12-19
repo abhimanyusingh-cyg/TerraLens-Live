@@ -10,14 +10,25 @@ import time
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="TerraLens Pro V2", layout="wide")
 
-# --- FIREBASE SETUP ---
+import json
+
+# --- FIREBASE SETUP (Updated for Secrets) ---
 if not firebase_admin._apps:
     try:
-        # Apni JSON key file ka sahi naam yahan likhein
-        cred = credentials.Certificate("serviceAccountKey.json")
+        # 1. Pehle Secrets se service_account ka string uthayenge
+        secret_content = st.secrets["firebase"]["service_account"]
+        
+        # 2. String ko JSON dictionary mein convert karenge
+        firebase_info = json.loads(secret_content)
+        
+        # 3. Firebase ko initialize karenge
+        cred = credentials.Certificate(firebase_info)
         firebase_admin.initialize_app(cred)
-    except:
-        st.error("Firebase key file nahi mili!")
+    except Exception as e:
+        st.error(f"Firebase connection error: {e}")
+        st.stop()
+
+# Database client setup
 db = firestore.client()
 
 # --- AI MODEL LOAD (YOLOv8) ---
