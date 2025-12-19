@@ -1,7 +1,6 @@
 streamlit
-firebase-admin
+ultralytics
+pillow
 numpy
-Pillow
-tensorflow-cpu
-streamlit-js-eval
-jinja2
+firebase-admin
+opencv-python-headless
