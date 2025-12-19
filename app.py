@@ -14,47 +14,63 @@ from streamlit_js_eval import get_geolocation
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="TerraLens Pro", page_icon="🌱", layout="wide")
 
-# --- DESIGN UPGRADE (CSS) ---
+# --- 🎨 FINAL MOBILE-OPTIMIZED CSS ---
 st.markdown("""
 <style>
-    /* 1. Main Background */
-    .stApp { background-color: #f8fafc; color: #1e293b; }
+    /* Main Background */
+    .stApp { background-color: #f8fafc; }
 
-    /* 2. SOLID CARDS (Fix for Transparency on Phone) */
-    .history-card, .badge-card, [data-testid="stMetric"] {
-        background-color: #ffffff !important; /* Pure white background */
-        opacity: 1 !important;               /* No transparency */
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 15px;
-        margin-bottom: 12px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); /* Halka sa shadow depth ke liye */
+    /* SOLID METRIC CARDS (Total Items, Points) */
+    [data-testid="stMetric"] {
+        background-color: #ffffff !important; 
+        border: 2px solid #e2e8f0 !important;
+        border-radius: 15px !important;
+        padding: 20px !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stMetricLabel"] { color: #64748b !important; font-weight: bold !important; opacity: 1 !important; }
+    [data-testid="stMetricValue"] { color: #064e3b !important; font-weight: 800 !important; opacity: 1 !important; }
+
+    /* SOLID HISTORY & BADGE CARDS */
+    .history-card, .badge-card {
+        background-color: #ffffff !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 12px !important;
+        padding: 15px !important;
+        margin-bottom: 12px !important;
+        opacity: 1 !important;
+        color: #1e293b !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05) !important;
+    }
+    .history-card { border-left: 6px solid #10b981 !important; }
+
+    /* BUTTONS */
+    div.stButton > button {
+        background: linear-gradient(90deg, #059669 0%, #10b981 100%);
+        color: white !important;
+        border-radius: 25px !important;
+        border: none !important;
+        padding: 10px 25px !important;
+        font-weight: 600 !important;
+        width: 100%;
     }
 
-    /* 3. Tables/Leaderboard Fix */
+    /* TABLE & DATAFRAME FIX */
     [data-testid="stTable"], [data-testid="stDataFrame"] {
         background-color: #ffffff !important;
-        border-radius: 12px;
-        padding: 5px;
-    }
-
-    /* 4. History Card Border */
-    .history-card {
-        border-left: 6px solid #10b981 !important;
-    }
-
-    /* 5. Mobile Font Contrast */
-    p, b, small, span {
-        color: #1e293b !important; /* Dark blue/black for readability */
+        border-radius: 12px !important;
+        padding: 10px !important;
+        opacity: 1 !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- LOGIC FUNCTIONS (ALL PREVIOUS ALIGNED) ---
+# --- LOGIC FUNCTIONS (ALL INTEGRATED) ---
 def get_rank(points):
-    if points < 50: return "Green Rookie 🌱", "#94a3b8" # Grey
-    if points < 200: return "Waste Warrior ⚔️", "#10b981" # Green
-    return "Eco Legend 👑", "#f59e0b" # Gold
+    if points < 50: return "Green Rookie 🌱", "#94a3b8"
+    if points < 200: return "Waste Warrior ⚔️", "#10b981"
+    return "Eco Legend 👑", "#f59e0b"
 
 def make_hashes(password): return hashlib.sha256(str.encode(password)).hexdigest()
 def check_hashes(password, hashed_text): return make_hashes(password) == hashed_text
@@ -133,7 +149,7 @@ if not st.session_state['logged_in']:
     with c2: st.image("https://images.unsplash.com/photo-1542601906990-b4d3fb778b09", caption="AI Powered Earth Care")
 
 else:
-    # --- LOGGED IN ---
+    # --- DASHBOARD ---
     u_info = db.collection('users').document(st.session_state['username']).get().to_dict()
     pts = u_info.get('points', 0)
     rank, r_col = get_rank(pts)
@@ -143,7 +159,6 @@ else:
         st.markdown(f"<div class='badge-card' style='background:{r_col}22; border-color:{r_col}; color:{r_col};'> {rank} </div>", unsafe_allow_html=True)
         st.metric("Total Balance", f"{pts} 🪙")
         
-        # CERTIFICATE
         if pts >= 100:
             if st.button("🎓 View Certificate"):
                 st.balloons()
@@ -159,7 +174,7 @@ else:
             st.session_state['logged_in'] = False
             st.rerun()
 
-    t1, t2, t3, t4 = st.tabs(["📸 Scanner", "📊 Impact Dashboard", "📜 History", "🏆 Global Leaderboard"])
+    t1, t2, t3, t4 = st.tabs(["📸 Scanner", "📊 Impact Dashboard", "📜 History", "🏆 Leaderboard"])
 
     with t1:
         st.subheader("♻️ New Scan")
@@ -194,7 +209,10 @@ else:
 
     with t3:
         st.subheader("Your Scan Timeline")
-        hist = [d.to_dict() for d in db.collection('scans').where('user','==',st.session_state['username']).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).stream()]
+        docs = db.collection('scans').where('user','==',st.session_state['username']).limit(20).stream()
+        hist = [d.to_dict() for d in docs]
+        hist.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+        
         for h in hist:
             st.markdown(f"<div class='history-card'><b>{h['item']}</b> Waste <br><small>📅 {h.get('date_str','Today')} at {h.get('time_str','--')}</small></div>", unsafe_allow_html=True)
 
