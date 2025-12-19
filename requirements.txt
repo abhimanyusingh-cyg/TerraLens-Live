@@ -4,3 +4,4 @@ numpy
 Pillow
 tensorflow-cpu
 streamlit-js-eval
+jinja2
