@@ -8,39 +8,24 @@ import os
 import json
 import hashlib
 import pandas as pd
+from streamlit_js_eval import get_geolocation # NEW LIBRARY FOR GPS
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="TerraLens Enterprise", page_icon="🌍", layout="centered")
 
-# --- 📍 LOCATION SETUP (YAHAN APNE COLLEGE KE COORDINATES DAALEIN) ---
-# Google Maps par apne college par right click karein -> numbers copy karein (Lat, Lon)
-ZONES = {
-    "Select Zone": {"lat": 0, "lon": 0},
-    
-    # Example: Yahan maine Lucknow ke coordinates daale hain example ke liye
-    "Main Gate": {"lat": 26.8467, "lon": 80.9462},  
-    "Canteen Area": {"lat": 26.8470, "lon": 80.9470},
-    "Hostel Block": {"lat": 26.8450, "lon": 80.9450},
-    "Admin Office": {"lat": 26.8480, "lon": 80.9480}
-}
-
-# --- 🧠 AI SMART MAPPING (FIX FOR WRONG PREDICTIONS) ---
+# --- AI SMART MAPPING ---
 def check_if_recyclable(label):
     label = label.lower()
-    
-    # Agar AI inme se kuch bhi bole, toh hum use sahi category mein maan lenge
     mapping = {
-        'plastic': ['bottle', 'plastic', 'lotion', 'sunscreen', 'nematode', 'whistle', 'candle', 'lighter'],
+        'plastic': ['bottle', 'plastic', 'lotion', 'sunscreen', 'nematode', 'whistle', 'candle', 'lighter', 'cup'],
         'paper': ['carton', 'paper', 'envelope', 'tissue', 'towel', 'diaper', 'packet', 'menu', 'comic_book'],
         'metal': ['can', 'beer_glass', 'pop_bottle', 'corkscrew'],
         'glass': ['goblet', 'wine_bottle', 'beaker']
     }
-    
     for category, keywords in mapping.items():
         if any(key in label for key in keywords):
-            return True, category.upper() # Return True and Category Name
-            
-    return False, label # Return False and what AI actually saw
+            return True, category.upper()
+    return False, label
 
 # --- UTILS & SECURITY ---
 def make_hashes(password):
@@ -81,14 +66,13 @@ def login_user(username, password):
             return True, doc.to_dict().get("points")
     return False, 0
 
-def save_scan_data(username, item_type, zone_name, lat, lon):
+def save_scan_data(username, item_type, lat, lon):
     db.collection('users').document(username).update({"points": firestore.Increment(10)})
     db.collection('scans').add({
         "user": username,
         "item": item_type,
-        "zone": zone_name,
-        "lat": lat,
-        "lon": lon,
+        "lat": lat, # REAL GPS LAT
+        "lon": lon, # REAL GPS LON
         "timestamp": firestore.SERVER_TIMESTAMP
     })
 
@@ -113,16 +97,15 @@ st.title("🌍 TerraLens Enterprise")
 
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 
-# LOGIN SYSTEM
+# LOGIN
 if not st.session_state['logged_in']:
-    st.markdown("### 🔐 Employee Login")
     menu = st.selectbox("Option", ["Login", "Sign Up"])
     user = st.text_input("Username")
     pwd = st.text_input("Password", type="password")
     
     if menu == "Sign Up" and st.button("Create Account"):
-        if create_user(user, pwd): st.success("Account Created! Please Login.")
-        else: st.error("User already exists!")
+        if create_user(user, pwd): st.success("Account Created!")
+        else: st.error("User exists!")
         
     elif menu == "Login" and st.button("Login"):
         valid, pts = login_user(user, pwd)
@@ -133,7 +116,7 @@ if not st.session_state['logged_in']:
         else: st.error("Invalid Credentials")
 
 else:
-    # MAIN APP
+    # LOGGED IN UI
     with st.sidebar:
         st.write(f"👤 **{st.session_state['username']}**")
         if st.button("Logout"):
@@ -145,40 +128,45 @@ else:
     with tab1:
         st.header("Recycle Waste")
         
-        # ZONE SELECTOR (Location Fix)
-        selected_zone = st.selectbox("📍 Current Location:", list(ZONES.keys()))
-        
+        # --- NEW: AUTOMATIC GPS FETCHER ---
+        st.info("📡 Getting your GPS Location...")
+        location = get_geolocation() # Ye browser se location mangega
+
+        lat, lon = None, None
+        if location and 'coords' in location:
+            lat = location['coords']['latitude']
+            lon = location['coords']['longitude']
+            st.success(f"📍 Location Found: {lat:.4f}, {lon:.4f}")
+        else:
+            st.warning("⚠️ Waiting for GPS... (Allow location access in browser)")
+
         img_file = st.camera_input("Take a photo")
         
         if img_file:
-            if selected_zone == "Select Zone":
-                st.warning("⚠️ Please select your location first!")
+            if lat is None:
+                st.error("🚫 Cannot verify without Location! Please allow GPS.")
             else:
                 st.image(img_file, width=300)
                 if st.button("♻️ Verify"):
-                    with st.spinner("AI analyzing..."):
+                    with st.spinner("Analyzing..."):
                         raw_label = classify_image(Image.open(img_file))
-                        
-                        # Use Smart Mapping Function
                         is_valid, category = check_if_recyclable(raw_label)
                         
                         if is_valid:
-                            coords = ZONES[selected_zone]
-                            save_scan_data(st.session_state['username'], category, selected_zone, coords['lat'], coords['lon'])
+                            # Ab hum Real GPS Coordinates save kar rahe hain
+                            save_scan_data(st.session_state['username'], category, lat, lon)
                             st.balloons()
-                            st.success(f"Verified: {category} Waste (+10 🪙)")
-                            st.caption(f"AI Detected: '{raw_label}' (Mapped to {category})")
+                            st.success(f"Verified: {category} (+10 🪙)")
                         else:
                             st.error(f"Item not recyclable.")
-                            st.warning(f"AI saw: '{raw_label}'. Try a clearer photo.")
+                            st.caption(f"AI Detected: {raw_label}")
 
     with tab2:
         st.header("🌏 Impact Map")
         map_data = get_map_data()
         if not map_data.empty:
-            # Map ab wahi dikhayega jahan scan hua hai
-            st.map(map_data, zoom=15) 
-            st.write(f"Total Live Scans: {len(map_data)}")
+            st.map(map_data, zoom=14) 
+            st.write(f"Live Scans: {len(map_data)}")
         else:
             st.info("No data available.")
 
