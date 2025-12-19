@@ -7,6 +7,8 @@ from firebase_admin import firestore, credentials
 import os
 import json
 import hashlib
+import time
+from datetime import datetime, timedelta
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="TerraLens Pro", page_icon="🌱", layout="centered")
@@ -20,22 +22,46 @@ def check_hashes(password, hashed_text):
         return True
     return False
 
-# --- ANTI-CHEAT FUNCTION (NEW) ---
+# --- ANTI-CHEAT FUNCTIONS ---
 def get_image_hash(image_bytes):
-    # Image ka unique fingerprint (MD5) banata hai
     return hashlib.md5(image_bytes).hexdigest()
 
 def check_duplicate_image(image_hash):
-    # Check karo ki ye hash database mein pehle se hai ya nahi
     doc = db.collection('processed_images').document(image_hash).get()
     return doc.exists
 
 def save_image_hash(image_hash, username, label):
-    # Hash ko save karo taaki dubara use na ho sake
     db.collection('processed_images').document(image_hash).set({
         "used_by": username,
         "label": label,
         "timestamp": firestore.SERVER_TIMESTAMP
+    })
+
+# --- COOLDOWN LOGIC (NEW) ---
+def check_cooldown(username):
+    # User ka data lao
+    doc = db.collection('users').document(username).get()
+    if doc.exists:
+        data = doc.to_dict()
+        last_scan = data.get('last_scan_timestamp')
+        
+        if last_scan:
+            # Current time (seconds mein)
+            now = datetime.now().timestamp()
+            # Difference nikalo
+            diff = now - last_scan
+            
+            # Agar 60 seconds (1 Minute) se kam hua hai
+            if diff < 60:
+                return False, int(60 - diff) # Return seconds left
+                
+    return True, 0
+
+def update_scan_time(username):
+    # Current time save karo
+    now = datetime.now().timestamp()
+    db.collection('users').document(username).update({
+        "last_scan_timestamp": now
     })
 
 # --- FIREBASE SETUP ---
@@ -123,8 +149,6 @@ if not st.session_state['logged_in']:
                     st.sidebar.success("Account Created! Please Login.")
                 else:
                     st.sidebar.error("Username already exists!")
-            else:
-                st.sidebar.warning("Fill all fields")
     elif choice == "Login":
         username = st.sidebar.text_input("Username")
         password = st.sidebar.text_input("Password", type='password')
@@ -153,27 +177,33 @@ if st.session_state['logged_in']:
 
     with tab1:
         st.header("Earn Green Credits")
+        st.info("ℹ️ Policy: You can scan 1 item every 60 seconds.")
+        
         option = st.radio("Input Type:", ("Camera", "Upload File"), horizontal=True)
         image_input = st.camera_input("Snap!") if option == "Camera" else st.file_uploader("Upload", type=["jpg", "png"])
 
         if image_input:
-            # 1. Image Load Karein
             image = Image.open(image_input)
             st.image(image, caption="Uploaded Photo", use_column_width=True)
             
-            # 2. Check Duplicate (Anti-Cheat)
-            # Hum image bytes ko wapas start se read karte hain hash banane ke liye
             image_input.seek(0)
             file_bytes = image_input.read()
             img_hash = get_image_hash(file_bytes)
             
             if st.button("♻️ Verify Now"):
-                # Pehle check karein duplicate
-                if check_duplicate_image(img_hash):
-                    st.error("🚫 Cheating Detected!")
-                    st.warning("This photo has already been used to claim points.")
+                # 1. Check Cooldown (Time Limit)
+                can_scan, seconds_left = check_cooldown(st.session_state['username'])
+                
+                if not can_scan:
+                    st.error(f"⏳ Please wait {seconds_left} seconds before scanning again.")
+                
+                # 2. Check Duplicate (Exact Copy)
+                elif check_duplicate_image(img_hash):
+                    st.error("🚫 Duplicate Photo Detected!")
+                    st.warning("Please do not use the exact same file.")
+                
                 else:
-                    # Agar duplicate nahi hai, toh AI Model chalayein
+                    # 3. Run AI Model
                     with st.spinner("AI checking..."):
                         label, confidence = classify_image(image, model)
                         recyclable = ['bottle', 'carton', 'can', 'paper', 'plastic', 'box', 'cup']
@@ -182,8 +212,9 @@ if st.session_state['logged_in']:
                             st.balloons()
                             update_points(st.session_state['username'], 10)
                             
-                            # IMPORTANT: Hash save karein taaki dubara use na ho
+                            # Save Hash & Time
                             save_image_hash(img_hash, st.session_state['username'], label)
+                            update_scan_time(st.session_state['username'])
                             
                             st.success(f"Verified: {label} (+10 🪙)")
                         else:
@@ -198,7 +229,7 @@ if st.session_state['logged_in']:
 
     with tab3:
         st.header("🎁 Redeem Store")
-        st.info("Coming Soon: Real Coupons!")
+        st.write("Current Balance:", current_points, "🪙")
 
 else:
     st.image("https://images.unsplash.com/photo-1532996122724-e3c354a0b15b")
