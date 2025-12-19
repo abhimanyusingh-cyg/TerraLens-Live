@@ -11,7 +11,7 @@ import hashlib
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="TerraLens Pro", page_icon="🌱", layout="centered")
 
-# --- SECURITY FUNCTIONS (HASHING) ---
+# --- SECURITY FUNCTIONS ---
 def make_hashes(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
@@ -20,23 +20,36 @@ def check_hashes(password, hashed_text):
         return True
     return False
 
+# --- ANTI-CHEAT FUNCTION (NEW) ---
+def get_image_hash(image_bytes):
+    # Image ka unique fingerprint (MD5) banata hai
+    return hashlib.md5(image_bytes).hexdigest()
+
+def check_duplicate_image(image_hash):
+    # Check karo ki ye hash database mein pehle se hai ya nahi
+    doc = db.collection('processed_images').document(image_hash).get()
+    return doc.exists
+
+def save_image_hash(image_hash, username, label):
+    # Hash ko save karo taaki dubara use na ho sake
+    db.collection('processed_images').document(image_hash).set({
+        "used_by": username,
+        "label": label,
+        "timestamp": firestore.SERVER_TIMESTAMP
+    })
+
 # --- FIREBASE SETUP ---
 if not firebase_admin._apps:
     try:
-        # Koshish karein Secrets se key lene ki (Cloud ke liye)
         key_dict = json.loads(st.secrets["textkey"])
         if "private_key" in key_dict:
             key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
         cred = credentials.Certificate(key_dict)
         firebase_admin.initialize_app(cred)
     except:
-        # Fallback for Local Testing (Cloud Shell Auto-Login)
-        # Agar secrets nahi mile toh environment auth use karega
         project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
         if project_id:
             firebase_admin.initialize_app(options={'projectId': project_id})
-        else:
-            st.warning("⚠️ Database connect nahi ho paya. Check Secrets or Local Auth.")
 
 db = firestore.client()
 
@@ -52,9 +65,8 @@ model = load_model()
 def create_user(username, password):
     doc_ref = db.collection('users').document(username)
     if doc_ref.get().exists:
-        return False # User pehle se hai
+        return False
     else:
-        # Password ko Hash karke save karein
         doc_ref.set({
             "name": username,
             "password": make_hashes(password),
@@ -65,11 +77,9 @@ def create_user(username, password):
 def login_user(username, password):
     doc_ref = db.collection('users').document(username)
     doc = doc_ref.get()
-    
     if doc.exists:
         user_data = doc.to_dict()
         stored_password = user_data.get("password")
-        # Check karein agar password match ho raha hai
         if stored_password and check_hashes(password, stored_password):
             return True, user_data.get("points")
     return False, 0
@@ -91,23 +101,20 @@ def classify_image(image, model):
     decoded = tf.keras.applications.mobilenet_v2.decode_predictions(predictions, top=1)[0][0]
     return decoded[1], decoded[2] * 100
 
-# --- APP UI START ---
+# --- APP UI ---
 st.title("🌱 TerraLens Ecosystem")
 
-# --- SESSION MANAGEMENT ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'username' not in st.session_state:
     st.session_state['username'] = ""
 
-# --- SIDEBAR: LOGIN / SIGNUP SYSTEM ---
+# --- SIDEBAR ---
 st.sidebar.title("🔐 Secure Access")
 
 if not st.session_state['logged_in']:
     choice = st.sidebar.selectbox("Menu", ["Login", "Sign Up"])
-    
     if choice == "Sign Up":
-        st.sidebar.subheader("Create New Account")
         new_user = st.sidebar.text_input("Username")
         new_pass = st.sidebar.text_input("Password", type='password')
         if st.sidebar.button("Sign Up"):
@@ -117,10 +124,8 @@ if not st.session_state['logged_in']:
                 else:
                     st.sidebar.error("Username already exists!")
             else:
-                st.sidebar.warning("Please fill all fields")
-
+                st.sidebar.warning("Fill all fields")
     elif choice == "Login":
-        st.sidebar.subheader("Login to Dashboard")
         username = st.sidebar.text_input("Username")
         password = st.sidebar.text_input("Password", type='password')
         if st.sidebar.button("Login"):
@@ -130,71 +135,70 @@ if not st.session_state['logged_in']:
                 st.session_state['username'] = username
                 st.rerun()
             else:
-                st.sidebar.error("Incorrect Username or Password")
-
+                st.sidebar.error("Wrong Credentials")
 else:
-    # AGAR LOGIN HO GAYA HAI:
     username = st.session_state['username']
-    
-    # Live points fetch karein
     doc = db.collection('users').document(username).get()
     current_points = doc.to_dict().get('points', 0)
-    
-    st.sidebar.success(f"Welcome, {username}!")
-    st.sidebar.metric("Your Balance", f"{current_points} 🪙")
-    
+    st.sidebar.success(f"Hi, {username}!")
+    st.sidebar.metric("Balance", f"{current_points} 🪙")
     if st.sidebar.button("Logout"):
         st.session_state['logged_in'] = False
         st.session_state['username'] = ""
         st.rerun()
 
-# --- MAIN APP CONTENT (Only visible after Login) ---
+# --- MAIN CONTENT ---
 if st.session_state['logged_in']:
     tab1, tab2, tab3 = st.tabs(["📸 Scan Waste", "🏆 Leaderboard", "🎁 Redeem Store"])
 
-    # TAB 1: SCANNER
     with tab1:
         st.header("Earn Green Credits")
         option = st.radio("Input Type:", ("Camera", "Upload File"), horizontal=True)
         image_input = st.camera_input("Snap!") if option == "Camera" else st.file_uploader("Upload", type=["jpg", "png"])
 
         if image_input:
+            # 1. Image Load Karein
             image = Image.open(image_input)
             st.image(image, caption="Uploaded Photo", use_column_width=True)
+            
+            # 2. Check Duplicate (Anti-Cheat)
+            # Hum image bytes ko wapas start se read karte hain hash banane ke liye
+            image_input.seek(0)
+            file_bytes = image_input.read()
+            img_hash = get_image_hash(file_bytes)
+            
             if st.button("♻️ Verify Now"):
-                with st.spinner("AI checking..."):
-                    label, confidence = classify_image(image, model)
-                    recyclable = ['bottle', 'carton', 'can', 'paper', 'plastic', 'box', 'cup']
-                    if any(x in label.lower() for x in recyclable):
-                        st.balloons()
-                        update_points(st.session_state['username'], 10)
-                        st.success(f"Verified: {label} (+10 🪙)")
-                    else:
-                        st.error(f"Trash Detected: {label}")
-                        st.warning("Only Recyclables give points!")
+                # Pehle check karein duplicate
+                if check_duplicate_image(img_hash):
+                    st.error("🚫 Cheating Detected!")
+                    st.warning("This photo has already been used to claim points.")
+                else:
+                    # Agar duplicate nahi hai, toh AI Model chalayein
+                    with st.spinner("AI checking..."):
+                        label, confidence = classify_image(image, model)
+                        recyclable = ['bottle', 'carton', 'can', 'paper', 'plastic', 'box', 'cup']
+                        
+                        if any(x in label.lower() for x in recyclable):
+                            st.balloons()
+                            update_points(st.session_state['username'], 10)
+                            
+                            # IMPORTANT: Hash save karein taaki dubara use na ho
+                            save_image_hash(img_hash, st.session_state['username'], label)
+                            
+                            st.success(f"Verified: {label} (+10 🪙)")
+                        else:
+                            st.error(f"Trash Detected: {label}")
+                            st.warning("Only Recyclables give points!")
 
-    # TAB 2: LEADERBOARD
     with tab2:
         st.header("🏆 Top Recyclers")
         leaders = get_leaderboard()
         for i, (name, pts) in enumerate(leaders):
             st.markdown(f"**{i+1}. {name}** — {pts} 🪙")
 
-    # TAB 3: REDEEM STORE
     with tab3:
-        st.header("🎁 Redeem Your Credits")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info("🎟️ Amazon ₹50 Voucher")
-            st.write("Cost: **500 🪙**")
-            st.button("Redeem", key="amz")
-        with col2:
-            st.info("☕ Starbucks Coffee")
-            st.write("Cost: **300 🪙**")
-            st.button("Redeem", key="sbux")
+        st.header("🎁 Redeem Store")
+        st.info("Coming Soon: Real Coupons!")
 
 else:
-    # LANDING PAGE (Jab user logout ho)
-    st.markdown("## 🌍 Welcome to TerraLens")
-    st.info("👈 Please **Login** or **Sign Up** from the Sidebar to start earning credits!")
-    st.image("https://images.unsplash.com/photo-1532996122724-e3c354a0b15b", caption="Recycle Today for a Better Tomorrow")
+    st.image("https://images.unsplash.com/photo-1532996122724-e3c354a0b15b")
