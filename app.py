@@ -132,22 +132,57 @@ else:
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📸 Scan", "📊 Stats", "🎁 Rewards", "📜 History", "🏆 Leaderboard"])
 
     with tab1:
+        st.subheader("♻️ New Scan")
         loc = get_geolocation()
+        
         if loc and 'coords' in loc:
             lat, lon = loc['coords']['latitude'], loc['coords']['longitude']
+            st.success("📍 GPS Locked")
+            
             img = st.camera_input("Snapshot")
-            if img and st.button("Verify & Claim"):
-                can, sec = check_cooldown(st.session_state['username'])
-                if not can: st.error(f"Wait {sec}s")
-                else:
-                    with st.spinner("AI Analysis..."):
-                        label = tf.keras.applications.mobilenet_v2.decode_predictions(model.predict(np.expand_dims(tf.keras.applications.mobilenet_v2.preprocess_input(np.array(ImageOps.fit(Image.open(img), (224,224)))),0)), top=1)[0][0][1]
-                        ok, cat = check_if_recyclable(label)
-                        if ok:
-                            db.collection('users').document(st.session_state['username']).update({"points": firestore.Increment(10), "last_scan_timestamp": datetime.now().timestamp()})
-                            db.collection('scans').add({"user": st.session_state['username'], "item": cat, "lat": lat, "lon": lon, "timestamp": firestore.SERVER_TIMESTAMP, "date_str": datetime.now().strftime("%d %b")})
-                            st.success(f"Verified {cat}!")
-        else: st.warning("Enable GPS")
+            
+            if img:
+                # Button ko thoda prominent banaya hai
+                if st.button("🔍 Verify & Claim 10 Points"):
+                    # 1. ANTI-CHEAT CHECK
+                    can, sec = check_cooldown(st.session_state['username'])
+                    if not can: 
+                        st.error(f"Anti-Cheat Active: Wait {sec}s")
+                    else:
+                        with st.spinner("AI is analyzing your waste..."):
+                            try:
+                                # Pre-processing image
+                                pil_img = Image.open(img)
+                                # MobileNetV2 requires (224, 224)
+                                img_resized = ImageOps.fit(pil_img, (224, 224), Image.Resampling.LANCZOS)
+                                img_array = np.array(img_resized)
+                                img_preprocessed = tf.keras.applications.mobilenet_v2.preprocess_input(img_array)
+                                
+                                # Prediction
+                                preds = model.predict(np.expand_dims(img_preprocessed, axis=0))
+                                decoded = tf.keras.applications.mobilenet_v2.decode_predictions(preds, top=3)[0] # Top 3 results for better accuracy
+                                
+                                # Check if ANY of top 3 are recyclable
+                                found = False
+                                for _, label, prob in decoded:
+                                    ok, cat = check_if_recyclable(label)
+                                    if ok:
+                                        save_scan_data(st.session_state['username'], cat, lat, lon)
+                                        st.balloons()
+                                        st.success(f"✅ Verified as {cat}! (+10 🪙)")
+                                        st.info(f"AI Confidence: {prob*100:.1f}%")
+                                        found = True
+                                        break
+                                
+                                if not found:
+                                    top_guess = decoded[0][1]
+                                    st.error(f"❌ Not Recyclable: AI thinks this is a '{top_guess}'")
+                                    st.warning("Tip: Try a clearer background or better lighting.")
+                                    
+                            except Exception as e:
+                                st.error(f"AI Engine Error: {e}")
+        else: 
+            st.warning("⚠️ Please enable GPS and Refresh to scan.")
 
     with tab2:
         st.subheader("ESG Analytics")
