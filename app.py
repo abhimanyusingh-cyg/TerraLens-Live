@@ -17,11 +17,36 @@ st.set_page_config(page_title="TerraLens Pro", page_icon="🌱", layout="wide")
 # --- DESIGN UPGRADE (CSS) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #f8fafc; }
-    [data-testid="stMetric"] { background: white; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; }
-    .badge-card { padding: 15px; border-radius: 12px; text-align: center; border: 2px solid #e2e8f0; margin-bottom: 10px; font-weight: bold; }
-    .history-card { background: white; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 6px solid #10b981; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    div.stButton > button { border-radius: 20px; font-weight: bold; }
+    /* 1. Main Background */
+    .stApp { background-color: #f8fafc; color: #1e293b; }
+
+    /* 2. SOLID CARDS (Fix for Transparency on Phone) */
+    .history-card, .badge-card, [data-testid="stMetric"] {
+        background-color: #ffffff !important; /* Pure white background */
+        opacity: 1 !important;               /* No transparency */
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); /* Halka sa shadow depth ke liye */
+    }
+
+    /* 3. Tables/Leaderboard Fix */
+    [data-testid="stTable"], [data-testid="stDataFrame"] {
+        background-color: #ffffff !important;
+        border-radius: 12px;
+        padding: 5px;
+    }
+
+    /* 4. History Card Border */
+    .history-card {
+        border-left: 6px solid #10b981 !important;
+    }
+
+    /* 5. Mobile Font Contrast */
+    p, b, small, span {
+        color: #1e293b !important; /* Dark blue/black for readability */
+    }
 </style>
 """, unsafe_allow_html=True)
 
