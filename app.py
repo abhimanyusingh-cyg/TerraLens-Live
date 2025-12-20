@@ -5,103 +5,172 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import json
 
-# --- PREMIUM PAGE CONFIG ---
-st.set_page_config(page_title="TerraLens Pro | Startup Edition", page_icon="🧪", layout="wide")
+# --- 1. PREMIUM PAGE CONFIG & PWA LINK ---
+st.set_page_config(
+    page_title="TerraLens AI | Smart Waste Intelligence", 
+    page_icon="🧪", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# --- HIGH-END CUSTOM CSS ---
+# PWA Manifest Connection
+st.markdown('<link rel="manifest" href="/manifest.json">', unsafe_allow_html=True)
+
+# --- 2. STARTUP GRADE CUSTOM CSS (DARK MODE) ---
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+    
     /* Main Background */
     .stApp {
-        background: radial-gradient(circle, #1a1a1a 0%, #0d0d0d 100%);
-        color: #e0e0e0;
+        background: radial-gradient(circle at top right, #1a1a1a, #050505);
+        color: #FFFFFF;
+        font-family: 'Inter', sans-serif;
     }
-    /* Hide Streamlit Header/Footer */
+    
+    /* Hide Default Headers */
     header {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    /* Modern Startup Card */
-    .premium-card {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        padding: 25px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        margin-bottom: 20px;
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+    /* Glassmorphism Containers */
+    div[data-testid="stVerticalBlock"] > div:has(div.stMarkdown) {
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(15px);
+        border-radius: 28px;
+        padding: 30px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        margin-bottom: 25px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.4);
     }
-    /* Action Button */
+
+    /* Main Gradient Title */
+    .hero-title {
+        background: linear-gradient(90deg, #00FFA3 0%, #03E5B7 50%, #00A3FF 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 3.5rem;
+        font-weight: 900;
+        text-align: center;
+        letter-spacing: -2px;
+        margin-bottom: 0px;
+    }
+
+    /* Neon Buttons */
     .stButton>button {
-        background: linear-gradient(45deg, #00c853, #b2ff59);
-        color: black !important;
-        font-weight: 800 !important;
-        border-radius: 50px !important;
+        background: linear-gradient(90deg, #00FFA3 0%, #03E5B7 100%) !important;
+        color: #0E1117 !important;
         border: none !important;
+        border-radius: 16px !important;
+        font-weight: 800 !important;
+        height: 3.8rem !important;
         text-transform: uppercase;
-        letter-spacing: 1px;
+        letter-spacing: 1.2px;
+        transition: 0.4s all ease !important;
     }
-    /* Metric styling */
-    [data-testid="stMetricValue"] { color: #00c853 !important; font-size: 2rem; }
+    
+    .stButton>button:hover {
+        transform: scale(1.02);
+        box-shadow: 0 0 30px rgba(0, 255, 163, 0.4);
+    }
+
+    /* Input Fields */
+    .stTextInput>div>div>input {
+        background-color: rgba(255,255,255,0.05) !important;
+        color: white !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FIREBASE SETUP ---
+# --- 3. FIREBASE CORE (Secrets Mode) ---
 if not firebase_admin._apps:
     try:
-        firebase_info = json.loads(st.secrets["firebase"]["service_account"])
+        secret_content = st.secrets["firebase"]["service_account"]
+        firebase_info = json.loads(secret_content)
         cred = credentials.Certificate(firebase_info)
         firebase_admin.initialize_app(cred)
-    except: pass
+    except Exception as e:
+        st.error(f"Systems Offline: {e}")
+        st.stop()
+
 db = firestore.client()
 
+# --- 4. NEURAL ENGINE LOAD ---
 @st.cache_resource
-def load_model(): return YOLO("best.pt")
-model = load_model()
+def load_engine():
+    return YOLO("best.pt")
 
-# --- APP LAYOUT ---
-col1, col2 = st.columns([1, 2])
+engine = load_engine()
 
-with col1:
-    st.image("https://cdn-icons-png.flaticon.com/512/3299/3299935.png", width=80)
-    st.title("TerraLens AI")
-    st.write("Next-Gen Waste Intelligence")
+# --- 5. APP LAYOUT ---
+st.markdown('<h1 class="hero-title">TERRALENS AI</h1>', unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #888; font-size: 1.1rem; margin-top: -10px;'>Next-Gen Waste Intelligence Engine</p>", unsafe_allow_html=True)
+
+left_col, right_col = st.columns([1, 1.2], gap="large")
+
+with left_col:
+    st.markdown("### 🛠️ System Control")
+    user_id = st.text_input("Enter Enterprise/User ID", placeholder="admin@terralens.ai")
     
-    # Leaderboard in a Card
-    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-    st.subheader("🏆 Global Ranking")
-    # ... (Leaderboard logic remains same)
-    st.markdown('</div>', unsafe_allow_html=True)
+    with st.expander("📊 Global Eco-Leaderboard", expanded=False):
+        try:
+            leader_ref = db.collection("users").order_by("points", direction=firestore.Query.DESCENDING).limit(5)
+            for doc in leader_ref.stream():
+                data = doc.to_dict()
+                st.write(f"🏆 **{doc.id}** — `{data.get('points', 0)} pts` ")
+        except:
+            st.info("Leaderboard initializing...")
 
-with col2:
-    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-    img_file = st.camera_input("INITIALIZE AI SCANNER")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    img_input = st.camera_input("INITIALIZE NEURAL SCAN", label_visibility="collapsed")
 
-    if img_file:
-        img = Image.open(img_file)
-        results = model.predict(img, conf=0.65) # Higher threshold for better accuracy
+with right_col:
+    st.markdown("### 🔍 Live Analysis")
+    if img_input:
+        img = Image.open(img_input)
+        
+        # High-threshold prediction
+        results = engine.predict(img, conf=0.7)
         
         if len(results[0].boxes) > 0:
-            res_plotted = results[0].plot()
-            st.image(res_plotted, use_container_width=True)
+            # Result Visualization
+            st.image(results[0].plot(), use_container_width=True)
             
-            label = model.names[int(results[0].boxes.cls[0])].upper()
+            raw_label = engine.names[int(results[0].boxes.cls[0])].upper()
+            confidence = results[0].boxes.conf[0]
             
-            # Smart Check for Accuracy (Stopping cloth-paper confusion)
-            if label == "PAPER" and results[0].boxes.conf[0] < 0.75:
-                label = "UNIDENTIFIED TEXTILE/WASTE"
-                color = "#ff9800"
+            # --- ACCURACY FILTER (Cloth vs Paper Logic) ---
+            if raw_label == "PAPER" and confidence < 0.82:
+                # If AI says paper but surety is low, it's likely Cloth or Mixed waste
+                final_label = "UNIDENTIFIED TEXTILE / MIXED"
+                status_color = "#FF9800"
+                eligible = False
             else:
-                color = "#00c853"
+                final_label = raw_label
+                status_color = "#00FFA3"
+                eligible = True
             
+            # Result Card
             st.markdown(f"""
-                <div style="text-align: center; padding: 20px; border-radius: 15px; background: rgba(0,200,83,0.1); border: 1px solid {color};">
-                    <h2 style="color:{color}; margin:0;">{label}</h2>
-                    <p style="margin:0;">Neural Confidence: {results[0].boxes.conf[0]:.2%}</p>
+                <div style="background: rgba(0, 255, 163, 0.05); padding: 25px; border-radius: 20px; border: 1px solid {status_color}; text-align: center;">
+                    <h2 style="color: {status_color}; margin-bottom: 5px;">{final_label}</h2>
+                    <p style="color: #888; margin: 0;">Neural Confidence: {confidence:.2%}</p>
                 </div>
             """, unsafe_allow_html=True)
-            
-            if st.button("CLAIM ECO-REWARDS"):
-                st.balloons()
+
+            # Eco-Reward Logic
+            if eligible and user_id:
+                if st.button("CLAIM ECO-CREDITS +10"):
+                    user_ref = db.collection("users").document(user_id)
+                    doc = user_ref.get()
+                    pts = doc.to_dict().get("points", 0) if doc.exists else 0
+                    user_ref.set({"points": pts + 10}, merge=True)
+                    st.balloons()
+                    st.toast(f"Credits added to {user_id}", icon="✅")
+            elif not eligible:
+                st.info("💡 Tip: Try capturing from a different angle for verified credits.")
         else:
-            st.error("AI Analysis: No specific waste category matched. Please reposition the item.")
+            st.error("Neural analysis failed: Category out of bounds. Please reposition item.")
+    else:
+        st.info("Waiting for optical input... Please scan a waste item.")
