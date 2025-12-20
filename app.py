@@ -4,164 +4,119 @@ from PIL import Image
 import numpy as np
 import firebase_admin
 from firebase_admin import credentials, firestore
-import hashlib
-import time
 import json
+import time
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="TerraLens Pro V2", layout="wide")
+st.set_page_config(page_title="TerraLens Pro V2", page_icon="♻️", layout="centered")
 
-# --- FIREBASE SETUP (Updated for Secrets) ---
+# --- MODERN UI CSS ---
+st.markdown("""
+    <style>
+    .main { background-color: #f8fbf8; }
+    .stButton>button {
+        width: 100%;
+        border-radius: 12px;
+        height: 3em;
+        background-color: #2E7D32;
+        color: white;
+        font-weight: bold;
+        border: none;
+        transition: 0.3s;
+    }
+    .stButton>button:hover { background-color: #1B5E20; border: none; }
+    .status-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        border-left: 5px solid #2E7D32;
+        margin-bottom: 20px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- FIREBASE SETUP ---
 if not firebase_admin._apps:
     try:
-        # 1. Pehle Secrets se service_account ka string uthayenge
-        secret_content = st.secrets["firebase"]["service_account"]
-        
-        # 2. String ko JSON dictionary mein convert karenge
-        firebase_info = json.loads(secret_content)
-        
-        # 3. Firebase ko initialize karenge
+        firebase_info = json.loads(st.secrets["firebase"]["service_account"])
         cred = credentials.Certificate(firebase_info)
         firebase_admin.initialize_app(cred)
     except Exception as e:
-        st.error(f"Firebase connection error: {e}")
+        st.error(f"Firebase Setup Error: {e}")
         st.stop()
 
-# Database client setup
 db = firestore.client()
 
-# --- AI MODEL LOAD (YOLOv8) ---
+# --- LOAD MODEL ---
 @st.cache_resource
-def load_yolo_model():
-    return YOLO('best.pt')
+def load_model():
+    return YOLO("best.pt")
 
-try:
-    model = load_yolo_model()
-except Exception as e:
-    st.error(f"Model Load Error: {e}")
+model = load_model()
 
-# --- WASTE MAPPING ---
-# Roboflow ke classes ke hisaab se ise adjust karein
-WASTE_MAP = {
-    'plastic': {'points': 10, 'msg': "Great! Plastic recycled. ♻️"},
-    'paper': {'points': 5, 'msg': "Paper added! Keep it up. 📄"},
-    'metal': {'points': 15, 'msg': "Metal is valuable! Nice work. 🥫"},
-    'glass': {'points': 12, 'msg': "Glass handled safely. 🍾"},
-    'trash': {'points': 0, 'msg': "Non-recyclable item detected. 🚮"}
-}
+# --- APP HEADER ---
+st.title("♻️ TerraLens Pro")
+st.markdown("### AI-Powered Waste Classifier")
 
-# --- FUNCTIONS ---
-def make_hashes(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
-
-def process_yolo(image):
-    results = model(image)
-    detected_items = []
-    
-    for r in results:
-        # Bounding box wali image generate karna
-        im_array = r.plot()  # Plotting boxes
-        res_image = Image.fromarray(im_array[..., ::-1])
-        
-        for box in r.boxes:
-            class_id = int(box.cls[0])
-            label = model.names[class_id].lower()
-            conf = float(box.conf[0])
-            if conf > 0.4: # 40% Confidence
-                detected_items.append(label)
-                
-    return res_image, detected_items
-
-# --- SESSION STATE ---
-if 'user_id' not in st.session_state:
-    st.session_state['user_id'] = None
-
-# --- SIDEBAR: LOGIN/SIGNUP ---
+# --- SIDEBAR (Login/Leaderboard) ---
 with st.sidebar:
-    st.title("🔐 User Portal")
-    if not st.session_state['user_id']:
-        choice = st.radio("Access", ["Login", "Sign Up"])
-        u_email = st.text_input("Email")
-        u_pass = st.text_input("Password", type='password')
+    st.header("👤 User Profile")
+    user_email = st.text_input("Login with Email")
+    if user_email:
+        st.success(f"Logged in as: {user_email}")
         
-        if st.button("Proceed"):
-            h_pass = make_hashes(u_pass)
-            if choice == "Sign Up":
-                db.collection('users').document(u_email).set({
-                    'email': u_email, 'pass': h_pass, 'points': 0, 'level': 'Rookie'
-                })
-                st.success("Account Created!")
-            else:
-                user_doc = db.collection('users').document(u_email).get()
-                if user_doc.exists and user_doc.to_dict()['pass'] == h_pass:
-                    st.session_state['user_id'] = u_email
-                    st.rerun()
-                else:
-                    st.error("Invalid Credentials")
-    else:
-        st.write(f"Logged in as: **{st.session_state['user_id']}**")
-        if st.button("Logout"):
-            st.session_state['user_id'] = None
-            st.rerun()
+    st.divider()
+    st.header("🏆 Leaderboard")
+    users_ref = db.collection("users").order_by("points", direction=firestore.Query.DESCENDING).limit(5)
+    for doc in users_ref.stream():
+        data = doc.to_dict()
+        st.write(f"**{doc.id}**: {data.get('points', 0)} pts")
 
-# --- MAIN APP INTERFACE ---
-if st.session_state['user_id']:
-    st.header("🌱 TerraLens AI Scanner (YOLOv8)")
+# --- MAIN CAPTURE ---
+img_file = st.camera_input("Scan Waste Item")
+
+if img_file:
+    img = Image.open(img_file)
+    # Model Prediction with Higher Confidence
+    results = model.predict(img, conf=0.6) 
     
-    # User Stats
-    u_data = db.collection('users').document(st.session_state['user_id']).get().to_dict()
-    col1, col2 = st.columns(2)
-    col1.metric("Your Eco-Points", u_data['points'])
-    col2.metric("Current Rank", u_data['level'])
-
-    # Camera Input
-    img_file = st.camera_input("Scan Waste Item")
-
-    if img_file:
-        img = Image.open(img_file)
-        with st.spinner('AI analyzing...'):
-            processed_img, detected_labels = process_yolo(img)
-        
-        st.image(processed_img, caption="AI Result (Detection Boxes)")
-        
-        if detected_labels:
-            # Sirf unique items pakadna
-            unique_items = list(set(detected_labels))
-            st.write(f"✅ Found: {', '.join(unique_items)}")
+    # Result Processing
+    if len(results[0].boxes) > 0:
+        for result in results:
+            # Show original image with boxes
+            res_plotted = result.plot()
+            st.image(res_plotted, caption="AI Detection Result", use_container_width=True)
             
-            total_points_earned = 0
-            for item in unique_items:
-                if item in WASTE_MAP:
-                    points = WASTE_MAP[item]['points']
-                    total_points_earned += points
-                    st.info(f"{item.capitalize()}: {WASTE_MAP[item]['msg']}")
+            # Identify Top Label
+            label_idx = int(result.boxes.cls[0])
+            label_name = model.names[label_idx]
+            prob = result.boxes.conf[0]
             
-            if total_points_earned > 0:
-                if st.button("Claim Points"):
-                    new_pts = u_data['points'] + total_points_earned
-                    # Level Logic
-                    new_lvl = "Rookie"
-                    if new_pts > 100: new_lvl = "Eco-Warrior"
-                    if new_pts > 500: new_lvl = "Sustainability Legend"
-                    
-                    db.collection('users').document(st.session_state['user_id']).update({
-                        'points': new_pts,
-                        'level': new_lvl
-                    })
-                    st.balloons()
-                    st.success(f"Added {total_points_earned} points to your account!")
-                    time.sleep(2)
-                    st.rerun()
-        else:
-            st.warning("AI couldn't verify the item. Try a better angle.")
+            # Modern UI Card for Result
+            st.markdown(f"""
+                <div class="status-card">
+                    <h4>Detected: <span style="color:#2E7D32;">{label_name.upper()}</span></h4>
+                    <p>Confidence: {prob:.2%}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Extra Feature: Eco-Insight
+            insights = {
+                "plastic": "Fact: Plastic takes 450+ years to decompose. Recycle it!",
+                "paper": "Fact: Recycling 1 ton of paper saves 17 trees.",
+                "metal": "Fact: Aluminum can be recycled infinitely without losing quality.",
+                "glass": "Fact: Glass is 100% recyclable and can be reused forever."
+            }
+            st.info(insights.get(label_name.lower(), "Good job! Dispose of this responsibly."))
 
-else:
-    st.info("Please Login from the sidebar to start scanning!")
-
-# --- FOOTER: LEADERBOARD ---
-st.divider()
-st.subheader("🏆 Global Eco-Leaders")
-top_users = db.collection('users').order_by('points', direction=firestore.Query.DESCENDING).limit(5).get()
-for i, user in enumerate(top_users):
-    d = user.to_dict()
-    st.text(f"{i+1}. {d['email']} - {d['points']} pts ({d['level']})")
+            # Update Points
+            if user_email and st.button("Claim 10 Eco-Points"):
+                user_ref = db.collection("users").document(user_email)
+                user_doc = user_ref.get()
+                current_points = user_doc.to_dict().get("points", 0) if user_doc.exists else 0
+                user_ref.set({"points": current_points + 10}, merge=True)
+                st.balloons()
+                st.success("Points Added to your Profile!")
+    else:
+        st.warning("⚠️ Waste not identified clearly. Please try again with better light or different angle.")
