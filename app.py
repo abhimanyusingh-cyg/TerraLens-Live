@@ -6,7 +6,12 @@ from firebase_admin import credentials, firestore
 import json
 
 # --- 1. CONFIG & PWA ---
-st.set_page_config(page_title="TerraLens Pro", page_icon="♻️", layout="wide")
+st.set_page_config(
+    page_title="TerraLens Pro", 
+    page_icon="♻️", 
+    layout="wide", 
+    initial_sidebar_state="collapsed" # Isse sidebar default mein chupa rahega
+)
 st.markdown('<link rel="manifest" href="/manifest.json">', unsafe_allow_html=True)
 
 # --- 2. PREMIUM CSS (Gamification Style) ---
