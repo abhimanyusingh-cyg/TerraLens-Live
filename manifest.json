@@ -1,0 +1,15 @@
+{
+  "name": "TerraLens Pro",
+  "short_name": "TerraLens",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2E7D32",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3299/3299935.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
